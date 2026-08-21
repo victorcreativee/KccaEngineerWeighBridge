@@ -1,50 +1,99 @@
 "use client";
 
-import { useState } from "react";
+import { FormEvent, useState } from "react";
+import { MasterDataView } from "../src/features/master-data/MasterDataView";
+import { OperationsFlow } from "../src/features/operations/OperationsFlow";
+import { ConnectionStatus } from "../src/components/ConnectionStatus";
+import { RecordsView } from "../src/features/records/RecordsView";
+import { DashboardView } from "../src/features/dashboard/DashboardView";
+import { ReportsView } from "../src/features/reports/ReportsView";
+import { AuditLogView } from "../src/features/audit/AuditLogView";
+import { logAudit } from "../src/utils/localAudit";
+import { readLocalAccounts } from "../src/utils/localAccounts";
+import { AccountManagementView } from "../src/features/accounts/AccountManagementView";
+import { MyAccountView } from "../src/features/accounts/MyAccountView";
 
-const navItems = ["Dashboard", "Daily Operations", "Records", "Reports", "Vehicles", "Drivers"];
-const recentEntries = [
-  { registration: "UBM 845Z", division: "Nakawa", weight: "10,920 kg", time: "10:34" },
-  { registration: "UG. 2337S", division: "Central", weight: "8,460 kg", time: "10:08" },
-  { registration: "UBN 021J", division: "Makindye", weight: "12,180 kg", time: "09:42" },
-];
-
+type LocalUser = { username: string; name: string; role: "Data Clerk" | "Engineer"; initials: string; mustChangePassword?: boolean };
+const allNavItems = ["Dashboard", "Daily Operations", "Records", "Reports", "Vehicles", "Drivers", "User Accounts", "Audit Log", "My Account"];
+const clerkNavItems = ["Dashboard", "Daily Operations", "Records", "Vehicles", "Drivers", "My Account"];
+function readSession(): LocalUser | null { if (typeof window === "undefined") return null; try { return JSON.parse(sessionStorage.getItem("buyala.local.session.v1") ?? "null") as LocalUser | null; } catch { return null; } }
 export default function Home() {
   const [active, setActive] = useState("Dashboard");
+  const [user, setUser] = useState<LocalUser | null>(readSession);
+  const [loginError, setLoginError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showMobileMore, setShowMobileMore] = useState(false);
+  const [quickAdd, setQuickAdd] = useState<{ kind: "vehicles" | "drivers"; value: string } | null>(null);
+
+  function signIn(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setLoginError(""); const data = new FormData(event.currentTarget); const username = String(data.get("username") ?? "").trim().toLowerCase(); const password = String(data.get("password") ?? ""); const account = readLocalAccounts().find((item) => item.username === username && item.password === password && item.active); if (!account) return setLoginError("Username or password is incorrect, or this account is inactive."); const nextUser: LocalUser = { username: account.username, name: account.name, role: account.role, initials: account.initials, mustChangePassword: account.mustChangePassword }; sessionStorage.setItem("buyala.local.session.v1", JSON.stringify(nextUser)); logAudit(nextUser.name, nextUser.role, "SIGN_IN", "Signed in to the local pilot", nextUser.username); setUser(nextUser); setActive(account.mustChangePassword ? "My Account" : account.role === "Data Clerk" ? "Daily Operations" : "Dashboard"); }
+  function signOut() { if (user) logAudit(user.name, user.role, "SIGN_OUT", "Signed out of the local pilot"); sessionStorage.removeItem("buyala.local.session.v1"); setUser(null); setActive("Dashboard"); setShowMobileMore(false); }
+  function passwordChanged() { if (!user) return; const nextUser = { ...user, mustChangePassword: false }; sessionStorage.setItem("buyala.local.session.v1", JSON.stringify(nextUser)); setUser(nextUser); setActive(nextUser.role === "Data Clerk" ? "Daily Operations" : "Dashboard"); }
+
+  if (!user) {
+    return (
+      <main className="access-page">
+        <section className="access-brand" aria-label="Buyala Waste Operations">
+          <div className="access-brand-content">
+            <span className="brand-mark large" aria-hidden="true">B</span>
+            <p className="eyebrow light">Buyala Waste Management Facility</p>
+            <h1>Waste operations,<br />made simpler.</h1>
+            <p>A focused weighbridge system designed to make every vehicle transaction faster, clearer and safer.</p>
+            <ul><li>Fast vehicle and driver lookup</li><li>Automatic weight calculations</li><li>Reliable daily records</li></ul>
+          </div>
+        </section>
+        <section className="access-panel">
+          <div className="access-card">
+            <p className="access-kicker">LOCAL AUTHENTICATION</p>
+            <h2>Sign in to Buyala</h2>
+            <p className="access-copy">Use your assigned local pilot account.</p>
+            <form className="local-login-form" onSubmit={signIn}><label>Username<input name="username" autoComplete="username" required /></label><label>Password<div className="password-field"><input name="password" type={showPassword ? "text" : "password"} autoComplete="current-password" required /><button type="button" onClick={() => setShowPassword((shown) => !shown)}>{showPassword ? "Hide" : "Show"}</button></div></label>{loginError && <p className="login-error" role="alert">{loginError}</p>}<button className="access-button" type="submit">Sign in <span aria-hidden="true">→</span></button></form>
+            <div className="local-access-note"><span aria-hidden="true">i</span><p><strong>Local pilot authentication</strong>Roles and sessions work on this computer. Firebase will replace the local account store before hosting.</p></div>
+            <div className="account-role-preview"><span><b>Data Clerk</b>Daily entry and operational records</span><span><b>Engineer</b>Full oversight, reports and audited corrections</span></div>
+            <p className="access-footer">No public registration · Two assigned pilot accounts</p>
+          </div>
+        </section>
+      </main>
+    );
+  }
+  if (user.mustChangePassword) return <MyAccountView user={user} forced onPasswordChanged={passwordChanged} onSignOut={signOut} />;
+  const navItems = user.role === "Engineer" ? allNavItems : clerkNavItems;
+  const moreItems = navItems.filter((item) => ["Reports", "Vehicles", "Drivers", "User Accounts", "Audit Log", "My Account"].includes(item));
   return (
     <div className="app-shell">
       <aside className="sidebar" aria-label="Primary navigation">
         <div className="brand"><span className="brand-mark" aria-hidden="true">B</span><div><strong>Buyala</strong><span>Waste Operations</span></div></div>
         <nav>{navItems.map((item) => <button key={item} className={active === item ? "nav-item active" : "nav-item"} onClick={() => setActive(item)}><span className="nav-icon" aria-hidden="true">{item.charAt(0)}</span>{item}</button>)}</nav>
-        <div className="sidebar-footer"><span className="status-dot" /> Online<small>All changes synced</small></div>
+        <div className="sidebar-footer"><ConnectionStatus /></div>
       </aside>
       <main>
         <header className="topbar">
           <div><p className="eyebrow">Buyala Waste Management Facility</p><h1>{active}</h1></div>
-          <div className="operator"><span>VE</span><div><strong>Victor Engineer</strong><small>Operator</small></div></div>
+          <div className="topbar-tools"><ConnectionStatus compact /><div className="operator"><span>{user.initials}</span><div><strong>{user.name}</strong><small>{user.role} · Local pilot</small></div><button className="sign-out" onClick={signOut}>Sign out</button></div></div>
         </header>
         <section className="content" aria-label="Dashboard overview">
-          <div className="intro-row"><div><h2>Today at Buyala</h2><p>Wednesday, 19 August 2026</p></div><button className="primary-action"><span aria-hidden="true">＋</span> Record Vehicle</button></div>
-          <div className="notice" role="status"><span className="notice-icon" aria-hidden="true">i</span><div><strong>Pilot foundation</strong><p>Live operational data is not connected yet. Figures below are clearly marked sample data for interface testing.</p></div><span className="sample-badge">SAMPLE DATA</span></div>
-          <div className="metrics">
-            <article className="metric primary"><p>Today&apos;s Waste</p><strong>148.4 <small>tonnes</small></strong><span>Across all completed entries</span></article>
-            <article className="metric"><p>Vehicles Today</p><strong>57</strong><span>54 completed · 3 open</span></article>
-            <article className="metric"><p>Concessionaires</p><strong>41</strong><span>72% of vehicles today</span></article>
-            <article className="metric attention"><p>Needs Attention</p><strong>5</strong><span>3 open · 2 unmatched records</span></article>
-          </div>
-          <div className="dashboard-grid">
-            <section className="panel division-panel">
-              <div className="panel-heading"><div><h3>Tonnage by division</h3><p>Net waste received today</p></div><span>148.4 t total</span></div>
-              <div className="bars">{[["Nakawa",48.2,100],["Central",37.4,78],["Makindye",31.8,66],["Nabugabo",24.6,51],["Other",6.4,13]].map(([name,value,width]) => <div className="bar-row" key={String(name)}><span>{name}</span><div className="track"><div style={{width:`${width}%`}} /></div><strong>{value} t</strong></div>)}</div>
-            </section>
-            <section className="panel activity-panel">
-              <div className="panel-heading"><div><h3>Recent activity</h3><p>Latest completed entries</p></div><button>View records</button></div>
-              <div className="activity-list">{recentEntries.map((entry) => <article key={entry.registration}><div className="truck-mark" aria-hidden="true">▰</div><div className="activity-main"><strong>{entry.registration}</strong><span>{entry.division}</span></div><div className="activity-value"><strong>{entry.weight}</strong><span>Completed ✓ · {entry.time}</span></div></article>)}</div>
-            </section>
-          </div>
+          {active === "Daily Operations" ? (
+            <OperationsFlow operatorName={user.name} onAddVehicle={(value) => { setQuickAdd({ kind: "vehicles", value }); setActive("Vehicles"); }} onAddDriver={(value) => { setQuickAdd({ kind: "drivers", value }); setActive("Drivers"); }} />
+          ) : active === "Records" ? (
+            <RecordsView canManage={user.role === "Engineer"} actorName={user.name} onContinueEntry={(id) => { localStorage.setItem("buyala.local.resumeEntryId", id); setActive("Daily Operations"); }} />
+          ) : active === "Vehicles" || active === "Drivers" ? (
+            <MasterDataView kind={active === "Vehicles" ? "vehicles" : "drivers"} autoOpen={quickAdd?.kind === (active === "Vehicles" ? "vehicles" : "drivers")} initialValue={quickAdd?.value ?? ""} onQuickAddClosed={() => setQuickAdd(null)} onSaved={() => { setQuickAdd(null); setActive("Daily Operations"); }} />
+          ) : active === "Reports" ? (
+            <ReportsView />
+          ) : active === "Audit Log" ? (
+            <AuditLogView />
+          ) : active === "User Accounts" ? (
+            <AccountManagementView engineerName={user.name} />
+          ) : active === "My Account" ? (
+            <MyAccountView user={user} onPasswordChanged={passwordChanged} />
+          ) : <DashboardView onRecordVehicle={() => setActive("Daily Operations")} onViewRecords={() => setActive("Records")} />}
         </section>
-        <nav className="mobile-nav" aria-label="Mobile navigation">{navItems.slice(0,4).map((item) => <button key={item} className={active === item ? "active" : ""} onClick={() => setActive(item)}><span>{item.charAt(0)}</span>{item === "Daily Operations" ? "Operations" : item}</button>)}</nav>
+        {showMobileMore && <><button className="mobile-more-scrim" aria-label="Close more menu" onClick={() => setShowMobileMore(false)} /><section className="mobile-more-sheet" role="dialog" aria-modal="true" aria-labelledby="mobile-more-title"><div className="mobile-more-heading"><div><p>{user.role}</p><h2 id="mobile-more-title">More</h2></div><button aria-label="Close menu" onClick={() => setShowMobileMore(false)}>×</button></div>{moreItems.map((item) => <button key={item} className={active === item ? "selected" : ""} onClick={() => { setActive(item); setShowMobileMore(false); }}><span className="more-icon" aria-hidden="true">{item.charAt(0)}</span><span><strong>{item}</strong><small>{item === "Reports" ? "Daily and date-range summaries" : item === "Vehicles" ? "Vehicle database and defaults" : item === "Drivers" ? "Driver names and telephone numbers" : item === "User Accounts" ? "Local access and password resets" : item === "My Account" ? "Change your own password" : "Account and operational activity"}</small></span><b aria-hidden="true">›</b></button>)}<button className="mobile-sign-out" onClick={signOut}><span className="more-icon">S</span><span><strong>Sign out</strong><small>End this local session</small></span><b>›</b></button></section></>}
+        <nav className="mobile-nav" aria-label="Mobile navigation">
+          {["Dashboard", "Daily Operations", "Records"].map((item) => <button key={item} className={active === item ? "active" : ""} onClick={() => { setActive(item); setShowMobileMore(false); }}><span>{item.charAt(0)}</span>{item === "Daily Operations" ? "Operations" : item}</button>)}
+          <button className={showMobileMore || moreItems.includes(active) ? "active" : ""} onClick={() => setShowMobileMore(true)} aria-haspopup="dialog" aria-expanded={showMobileMore}><span>•••</span>More</button>
+        </nav>
       </main>
+      <ConnectionStatus notice />
     </div>
   );
 }

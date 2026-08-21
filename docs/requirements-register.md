@@ -5,7 +5,7 @@ These questions remain **NEEDS CONFIRMATION**. They must not become product rule
 1. Is tare stored per vehicle, or measured after dumping?
 2. Can the same vehicle use different collection routes?
 3. Can the same vehicle operate under different divisions?
-4. What exactly does `Nabugabo` represent?
+4. **RESOLVED FROM SUPPLIED REPORTS:** `Nabugabo` / `NUJV` is a private waste company/operator grouping, not a Kampala division. Preserve the exact legal/display name as reference data once confirmed by the stakeholder.
 5. Are there multiple daily shifts?
 6. Who enters weighbridge records?
 7. Are records reviewed or approved by another person?
@@ -31,3 +31,6 @@ These questions remain **NEEDS CONFIRMATION**. They must not become product rule
 - Normalize registrations for matching while retaining the entered display value.
 - Preserve unmatched vehicle and driver flags after manual details are entered.
 - Retain completed transactions; corrections and voids must remain auditable.
+- Keep geographic origin, Kampala division, operator category, and private company as separate fields. They answer different reporting questions and must not be combined into one "division" field.
+- Treat report figures supplied for 2021 and 2026 as historical reference material, not seed data for the live pilot.
+- Preserve both `Rubaga` and `Lubaga` source spellings until KCCA confirms the canonical reporting label.
