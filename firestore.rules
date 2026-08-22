@@ -1,0 +1,23 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function profile() { return get(/databases/$(database)/documents/profiles/$(request.auth.uid)); }
+    function engineer() { return signedIn() && profile().data.active == true && profile().data.role == "Engineer"; }
+    function activeUser() { return signedIn() && profile().data.active == true; }
+
+    match /profiles/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || engineer());
+      allow create, update: if engineer();
+      allow delete: if false;
+    }
+    match /entries/{id} {
+      allow read, create: if activeUser();
+      allow update: if activeUser() && (engineer() || resource.data.status == "OPEN");
+      allow delete: if false;
+    }
+    match /vehicles/{id} { allow read, create, update: if activeUser(); allow delete: if false; }
+    match /drivers/{id} { allow read, create, update: if activeUser(); allow delete: if false; }
+    match /auditEvents/{id} { allow create: if activeUser(); allow read: if engineer(); allow update, delete: if false; }
+  }
+}

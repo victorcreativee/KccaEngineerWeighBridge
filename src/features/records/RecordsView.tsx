@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { logAudit } from "../../utils/localAudit";
+import { saveSharedData, sharedKeys } from "../../services/firebase/sharedData";
 
 type Correction = { correctedAt: string; correctedBy?: string; reason: string; before: Record<string, string>; after: Record<string, string> };
 type Entry = { id: string; facilityId?: string; localTicket?: string; createdBy?: string; createdAt?: string; updatedBy?: string; updatedAt?: string; registration: string; vehicleMatched: boolean; vehicleType?: string; division?: string; originArea?: string; operatorCategory?: string; company?: string; concessionaire?: string; driverName: string; driverMatched: boolean; driverPhone: string; routeSource: string; arrivalTime: string; departureTime?: string; grossKg: number; tareKg: number; netKg: number; tareCaptureMode?: "UNCONFIRMED"; status: "OPEN" | "COMPLETED" | "VOIDED"; operationDate: string; completedAt: string; voidReason?: string; voidedAt?: string; voidedBy?: string; correctionHistory?: Correction[] };
@@ -40,7 +41,7 @@ export function RecordsView({ onContinueEntry, canManage = true, actorName = "Lo
   const exceptions = filtered.filter((entry) => !entry.vehicleMatched || !entry.driverMatched).length;
   const activeFilters = [search.trim(), dateFilter !== "all" ? dateFilter : "", status !== "all" ? status : "", division !== "all" ? division : "", concessionaire !== "all" ? concessionaire : "", matchQuality !== "all" ? matchQuality : ""].filter(Boolean).length;
   function clearFilters() { setSearch(""); setDateFilter("all"); setDateFrom(""); setDateTo(""); setStatus("all"); setDivision("all"); setConcessionaire("all"); setMatchQuality("all"); }
-  function voidEntry(id: string, reason: string) { const changedAt = new Date().toISOString(); const updated = entries.map((entry) => entry.id === id ? { ...entry, status: "VOIDED" as const, voidReason: reason, voidedAt: changedAt, voidedBy: actorName, updatedAt: changedAt, updatedBy: actorName } : entry); setEntries(updated); localStorage.setItem(entriesKey, JSON.stringify(updated)); const changed = updated.find((entry) => entry.id === id); if (changed) logAudit(actorName, "Engineer", "TRANSACTION_VOIDED", `Voided ${changed.registration}: ${reason}`, changed.localTicket); setSelected(changed ?? null); }
+  function voidEntry(id: string, reason: string) { const changedAt = new Date().toISOString(); const updated = entries.map((entry) => entry.id === id ? { ...entry, status: "VOIDED" as const, voidReason: reason, voidedAt: changedAt, voidedBy: actorName, updatedAt: changedAt, updatedBy: actorName } : entry); setEntries(updated); saveSharedData(sharedKeys.entries, updated); const changed = updated.find((entry) => entry.id === id); if (changed) logAudit(actorName, "Engineer", "TRANSACTION_VOIDED", `Voided ${changed.registration}: ${reason}`, changed.localTicket); setSelected(changed ?? null); }
   function correctEntry(id: string, values: { originArea: string; division: string; operatorCategory: string; company: string; routeSource: string; departureTime: string; reason: string }) {
     const current = entries.find((entry) => entry.id === id); if (!current) return;
     const before = { originArea: current.originArea ?? "", division: current.division ?? "", operatorCategory: operatorCategory(current), company: current.company ?? "", routeSource: current.routeSource, departureTime: current.departureTime ?? "" };
@@ -48,7 +49,7 @@ export function RecordsView({ onContinueEntry, canManage = true, actorName = "Lo
     const changedAt = new Date().toISOString();
     const correction: Correction = { correctedAt: changedAt, correctedBy: actorName, reason: values.reason, before, after };
     const updated = entries.map((entry) => entry.id === id ? { ...entry, ...after, updatedAt: changedAt, updatedBy: actorName, concessionaire: values.operatorCategory === "Concessionaire" ? "Yes" : values.operatorCategory === "Non-concessionaire" ? "No" : "", correctionHistory: [...(entry.correctionHistory ?? []), correction] } : entry);
-    setEntries(updated); localStorage.setItem(entriesKey, JSON.stringify(updated)); logAudit(actorName, "Engineer", "RECORD_CORRECTED", `Corrected reporting details for ${current.registration}: ${values.reason}`, current.localTicket); setSelected(updated.find((entry) => entry.id === id) ?? null);
+    setEntries(updated); saveSharedData(sharedKeys.entries, updated); logAudit(actorName, "Engineer", "RECORD_CORRECTED", `Corrected reporting details for ${current.registration}: ${values.reason}`, current.localTicket); setSelected(updated.find((entry) => entry.id === id) ?? null);
   }
 
   return <div className="records-page">

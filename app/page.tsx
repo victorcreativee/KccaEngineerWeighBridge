@@ -9,14 +9,14 @@ import { DashboardView } from "../src/features/dashboard/DashboardView";
 import { ReportsView } from "../src/features/reports/ReportsView";
 import { AuditLogView } from "../src/features/audit/AuditLogView";
 import { logAudit } from "../src/utils/localAudit";
-import { readLocalAccounts } from "../src/utils/localAccounts";
 import { AccountManagementView } from "../src/features/accounts/AccountManagementView";
 import { MyAccountView } from "../src/features/accounts/MyAccountView";
+import { observeUser, signIn as firebaseSignIn, signOut as firebaseSignOut } from "../src/services/firebase/auth";
+import { hydrateSharedData, subscribeSharedData } from "../src/services/firebase/sharedData";
 
-type LocalUser = { username: string; name: string; role: "Data Clerk" | "Engineer"; initials: string; mustChangePassword?: boolean };
-const allNavItems = ["Dashboard", "Daily Operations", "Records", "Reports", "Vehicles", "Drivers", "User Accounts", "Audit Log", "My Account"];
+type LocalUser = { uid: string; username: string; name: string; role: "Data Clerk" | "Engineer"; initials: string; mustChangePassword?: boolean };
+const allNavItems = ["Dashboard", "Daily Operations", "Records", "Reports", "Vehicles", "Drivers", "Audit Log", "My Account"];
 const clerkNavItems = ["Dashboard", "Daily Operations", "Records", "Vehicles", "Drivers", "My Account"];
-function readSession(): LocalUser | null { if (typeof window === "undefined") return null; try { return JSON.parse(sessionStorage.getItem("buyala.local.session.v1") ?? "null") as LocalUser | null; } catch { return null; } }
 export default function Home() {
   const [active, setActive] = useState("Dashboard");
   const [user, setUser] = useState<LocalUser | null>(null);
@@ -27,20 +27,20 @@ export default function Home() {
   const [quickAdd, setQuickAdd] = useState<{ kind: "vehicles" | "drivers"; value: string } | null>(null);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const restored = readSession();
-      if (restored) {
-        setUser(restored);
-        setActive(restored.mustChangePassword ? "My Account" : restored.role === "Data Clerk" ? "Daily Operations" : "Dashboard");
-      }
+    let stopDataSync: (() => void) | undefined;
+    const unsubscribe = observeUser(async (restored) => {
+      stopDataSync?.(); stopDataSync = undefined;
+      if (restored) { await hydrateSharedData(restored.role); stopDataSync = subscribeSharedData(restored.role); }
+      setUser(restored);
+      if (restored) setActive(restored.mustChangePassword ? "My Account" : restored.role === "Data Clerk" ? "Daily Operations" : "Dashboard");
       setSessionReady(true);
-    }, 0);
-    return () => window.clearTimeout(timer);
+    });
+    return () => { stopDataSync?.(); unsubscribe(); };
   }, []);
 
-  function signIn(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setLoginError(""); const data = new FormData(event.currentTarget); const username = String(data.get("username") ?? "").trim().toLowerCase(); const password = String(data.get("password") ?? ""); const account = readLocalAccounts().find((item) => item.username === username && item.password === password && item.active); if (!account) return setLoginError("Username or password is incorrect, or this account is inactive."); const nextUser: LocalUser = { username: account.username, name: account.name, role: account.role, initials: account.initials, mustChangePassword: account.mustChangePassword }; sessionStorage.setItem("buyala.local.session.v1", JSON.stringify(nextUser)); logAudit(nextUser.name, nextUser.role, "SIGN_IN", "Signed in to the local pilot", nextUser.username); setUser(nextUser); setActive(account.mustChangePassword ? "My Account" : account.role === "Data Clerk" ? "Daily Operations" : "Dashboard"); }
-  function signOut() { if (user) logAudit(user.name, user.role, "SIGN_OUT", "Signed out of the local pilot"); sessionStorage.removeItem("buyala.local.session.v1"); setUser(null); setActive("Dashboard"); setShowMobileMore(false); }
-  function passwordChanged() { if (!user) return; const nextUser = { ...user, mustChangePassword: false }; sessionStorage.setItem("buyala.local.session.v1", JSON.stringify(nextUser)); setUser(nextUser); setActive(nextUser.role === "Data Clerk" ? "Daily Operations" : "Dashboard"); }
+  async function signIn(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setLoginError(""); const data = new FormData(event.currentTarget); const username = String(data.get("username") ?? "").trim().toLowerCase(); const password = String(data.get("password") ?? ""); try { const nextUser = await firebaseSignIn(username, password); logAudit(nextUser.name, nextUser.role, "SIGN_IN", "Signed in with Firebase Authentication", nextUser.username); setUser(nextUser); setActive(nextUser.mustChangePassword ? "My Account" : nextUser.role === "Data Clerk" ? "Daily Operations" : "Dashboard"); } catch { setLoginError(navigator.onLine ? "Username or password is incorrect, or this account is inactive." : "Internet is required for this first Firebase sign-in. Offline sign-in will be added next."); } }
+  async function signOut() { if (user) logAudit(user.name, user.role, "SIGN_OUT", "Signed out of Firebase Authentication"); await firebaseSignOut(); setUser(null); setActive("Dashboard"); setShowMobileMore(false); }
+  function passwordChanged() { if (!user) return; const nextUser = { ...user, mustChangePassword: false }; setUser(nextUser); setActive(nextUser.role === "Data Clerk" ? "Daily Operations" : "Dashboard"); }
 
   if (!sessionReady) return <main className="session-loading" aria-label="Opening Buyala"><span className="brand-mark large" aria-hidden="true">B</span><p>Opening Buyala…</p></main>;
   if (!user) {
@@ -57,13 +57,13 @@ export default function Home() {
         </section>
         <section className="access-panel">
           <div className="access-card">
-            <p className="access-kicker">LOCAL AUTHENTICATION</p>
+            <p className="access-kicker">SECURE FIREBASE ACCESS</p>
             <h2>Sign in to Buyala</h2>
-            <p className="access-copy">Use your assigned local pilot account.</p>
+            <p className="access-copy">Use your assigned Buyala account.</p>
             <form className="local-login-form" onSubmit={signIn}><label>Username<input name="username" autoComplete="username" required /></label><label>Password<div className="password-field"><input name="password" type={showPassword ? "text" : "password"} autoComplete="current-password" required /><button type="button" onClick={() => setShowPassword((shown) => !shown)}>{showPassword ? "Hide" : "Show"}</button></div></label>{loginError && <p className="login-error" role="alert">{loginError}</p>}<button className="access-button" type="submit">Sign in <span aria-hidden="true">→</span></button></form>
-            <div className="local-access-note"><span aria-hidden="true">i</span><p><strong>Local pilot authentication</strong>Roles and sessions work on this computer. Firebase will replace the local account store before hosting.</p></div>
+            <div className="local-access-note"><span aria-hidden="true">i</span><p><strong>Firebase Authentication</strong>Your password and role now follow your account securely across connected devices.</p></div>
             <div className="account-role-preview"><span><b>Data Clerk</b>Daily entry and operational records</span><span><b>Engineer</b>Full oversight, reports and audited corrections</span></div>
-            <p className="access-footer">No public registration · Two assigned pilot accounts</p>
+            <p className="access-footer">No public registration · Assigned staff accounts only</p>
           </div>
         </section>
       </main>
@@ -77,12 +77,12 @@ export default function Home() {
       <aside className="sidebar" aria-label="Primary navigation">
         <div className="brand"><span className="brand-mark" aria-hidden="true">B</span><div><strong>Buyala</strong><span>Waste Operations</span></div></div>
         <nav>{navItems.map((item) => <button key={item} className={active === item ? "nav-item active" : "nav-item"} onClick={() => setActive(item)}><span className="nav-icon" aria-hidden="true">{item.charAt(0)}</span>{item}</button>)}</nav>
-        <div className="sidebar-footer"><ConnectionStatus /></div>
+          <div className="sidebar-footer"><ConnectionStatus /></div>
       </aside>
       <main>
         <header className="topbar">
           <div><p className="eyebrow">Buyala Waste Management Facility</p><h1>{active}</h1></div>
-          <div className="topbar-tools"><ConnectionStatus compact /><div className="operator"><span>{user.initials}</span><div><strong>{user.name}</strong><small>{user.role} · Local pilot</small></div><button className="sign-out" onClick={signOut}>Sign out</button></div></div>
+          <div className="topbar-tools"><ConnectionStatus compact /><div className="operator"><span>{user.initials}</span><div><strong>{user.name}</strong><small>{user.role} · Firebase account</small></div><button className="sign-out" onClick={signOut}>Sign out</button></div></div>
         </header>
         <section className="content" aria-label="Dashboard overview">
           {active === "Daily Operations" ? (

@@ -2,6 +2,7 @@
 
 import { ChangeEvent, useMemo, useState } from "react";
 import { exportExcelWorkbook } from "./exportExcelWorkbook";
+import { saveSharedData, sharedKeys } from "../../services/firebase/sharedData";
 
 type Correction = { correctedAt: string; correctedBy?: string; reason: string; before: Record<string, string>; after: Record<string, string> };
 type Entry = { id: string; facilityId?: string; localTicket?: string; createdBy?: string; createdAt?: string; updatedBy?: string; updatedAt?: string; registration: string; vehicleMatched: boolean; vehicleType?: string; division?: string; originArea?: string; operatorCategory?: string; company?: string; concessionaire?: string; driverName: string; driverMatched: boolean; driverPhone: string; routeSource: string; arrivalTime: string; departureTime?: string; grossKg: number; tareKg: number; netKg: number; tareCaptureMode?: "UNCONFIRMED"; status: "OPEN" | "COMPLETED" | "VOIDED"; operationDate: string; completedAt: string; voidReason?: string; voidedAt?: string; voidedBy?: string; correctionHistory?: Correction[] };
@@ -88,7 +89,7 @@ export function ReportsView() {
       if (backup.schemaVersion !== 1 || backup.application !== "Buyala Waste Operations" || !Array.isArray(backup.vehicles) || !Array.isArray(backup.drivers) || !Array.isArray(backup.entries)) throw new Error("invalid");
       const approved = window.confirm(`Restore this backup?\n\n${backup.vehicles.length} vehicles\n${backup.drivers.length} drivers\n${backup.entries.length} transactions\n\nThis will replace the data currently saved in this browser.`);
       if (!approved) return setBackupMessage("Restore cancelled. Current local data was not changed.");
-      localStorage.setItem(vehiclesKey, JSON.stringify(backup.vehicles)); localStorage.setItem(driversKey, JSON.stringify(backup.drivers)); localStorage.setItem(entriesKey, JSON.stringify(backup.entries)); window.location.reload();
+      saveSharedData(sharedKeys.vehicles, backup.vehicles as { id: string }[]); saveSharedData(sharedKeys.drivers, backup.drivers as { id: string }[]); saveSharedData(sharedKeys.entries, backup.entries as { id: string }[]); window.setTimeout(() => window.location.reload(), 500);
     } catch { setBackupMessage("This file is not a valid Buyala local backup. No data was changed."); }
   }
 

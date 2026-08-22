@@ -2,6 +2,7 @@
 
 import { FormEvent, useMemo, useState } from "react";
 import { normalizeRegistration } from "../../utils/registration";
+import { saveSharedData, sharedKeys } from "../../services/firebase/sharedData";
 
 type Kind = "vehicles" | "drivers";
 type VehicleRecord = { id: string; registration: string; normalizedRegistration: string; vehicleType: string; company: string; concessionaire: string; operatorCategory?: string; originArea?: string; division: string; route: string; tareKg?: number; active: boolean };
@@ -36,7 +37,7 @@ export function MasterDataView({ kind, autoOpen = false, initialValue = "", onSa
     const tareText = String(data.get("tareKg") ?? "").trim();
     const operatorCategory = String(data.get("operatorCategory") ?? "");
     const next: VehicleRecord = { id: editingVehicle?.id ?? crypto.randomUUID(), registration: registration.toUpperCase(), normalizedRegistration, vehicleType: String(data.get("vehicleType") ?? ""), company: String(data.get("company") ?? ""), concessionaire: operatorCategory === "Concessionaire" ? "Yes" : operatorCategory === "Non-concessionaire" ? "No" : "", operatorCategory, originArea: String(data.get("originArea") ?? ""), division: String(data.get("division") ?? ""), route: String(data.get("route") ?? ""), tareKg: tareText ? Number(tareText) : undefined, active: editingVehicle?.active ?? true };
-    const updated = editingVehicle ? vehicles.map((vehicle) => vehicle.id === editingVehicle.id ? next : vehicle) : [...vehicles, next]; setVehicles(updated); localStorage.setItem(vehicleKey, JSON.stringify(updated)); closeForm(); onSaved?.();
+    const updated = editingVehicle ? vehicles.map((vehicle) => vehicle.id === editingVehicle.id ? next : vehicle) : [...vehicles, next]; setVehicles(updated); saveSharedData(sharedKeys.vehicles, updated); closeForm(); onSaved?.();
   }
 
   function saveDriver(event: FormEvent<HTMLFormElement>) {
@@ -44,7 +45,7 @@ export function MasterDataView({ kind, autoOpen = false, initialValue = "", onSa
     const data = new FormData(event.currentTarget); const fullName = String(data.get("fullName") ?? "").trim();
     if (!fullName) return setError("Enter the driver's full name.");
     const next: DriverRecord = { id: editingDriver?.id ?? crypto.randomUUID(), fullName, telephone: String(data.get("telephone") ?? "").trim(), notes: String(data.get("notes") ?? "").trim(), active: editingDriver?.active ?? true };
-    const updated = editingDriver ? drivers.map((driver) => driver.id === editingDriver.id ? next : driver) : [...drivers, next]; setDrivers(updated); localStorage.setItem(driverKey, JSON.stringify(updated)); closeForm(); onSaved?.();
+    const updated = editingDriver ? drivers.map((driver) => driver.id === editingDriver.id ? next : driver) : [...drivers, next]; setDrivers(updated); saveSharedData(sharedKeys.drivers, updated); closeForm(); onSaved?.();
   }
 
   function openNew() { setEditingVehicle(null); setEditingDriver(null); setError(""); setShowForm(true); }
@@ -52,8 +53,8 @@ export function MasterDataView({ kind, autoOpen = false, initialValue = "", onSa
   function editDriver(driver: DriverRecord) { setEditingDriver(driver); setEditingVehicle(null); setError(""); setShowForm(true); }
   function closeForm() { setShowForm(false); setEditingVehicle(null); setEditingDriver(null); setError(""); if (autoOpen) onQuickAddClosed?.(); }
 
-  function toggleVehicle(id: string) { const updated = vehicles.map((vehicle) => vehicle.id === id ? { ...vehicle, active: vehicle.active === false } : vehicle); setVehicles(updated); localStorage.setItem(vehicleKey, JSON.stringify(updated)); }
-  function toggleDriver(id: string) { const updated = drivers.map((driver) => driver.id === id ? { ...driver, active: driver.active === false } : driver); setDrivers(updated); localStorage.setItem(driverKey, JSON.stringify(updated)); }
+  function toggleVehicle(id: string) { const updated = vehicles.map((vehicle) => vehicle.id === id ? { ...vehicle, active: vehicle.active === false } : vehicle); setVehicles(updated); saveSharedData(sharedKeys.vehicles, updated); }
+  function toggleDriver(id: string) { const updated = drivers.map((driver) => driver.id === id ? { ...driver, active: driver.active === false } : driver); setDrivers(updated); saveSharedData(sharedKeys.drivers, updated); }
 
   const isVehicles = kind === "vehicles";
   const count = isVehicles ? vehicles.length : drivers.length;
@@ -62,7 +63,7 @@ export function MasterDataView({ kind, autoOpen = false, initialValue = "", onSa
 
   return <div className="master-page">
     <div className="master-heading"><div><p className="master-kicker">MASTER DATA</p><h2>{isVehicles ? "Vehicles" : "Drivers"}</h2><p>{isVehicles ? "Manage vehicles used at the Buyala weighbridge." : "Manage drivers available during vehicle entry."}</p></div><button className="primary-action" onClick={openNew}>＋ Add {isVehicles ? "vehicle" : "driver"}</button></div>
-    <div className="local-store-banner"><span aria-hidden="true">●</span><div><strong>Saved on this device</strong><p>These pilot records stay in this browser for now. Firestore will become the operational source of truth later.</p></div></div>
+    <div className="local-store-banner"><span aria-hidden="true">●</span><div><strong>Device + Firebase</strong><p>Changes are saved on this device and shared through the protected Firestore database when connected.</p></div></div>
     <div className="master-stats"><article><strong>{count}</strong><span>Total {kind}</span></article><article><strong>{activeCount}</strong><span>Active</span></article><article><strong>{shown}</strong><span>Matching search</span></article></div>
     <section className="master-table-card">
       <div className="master-toolbar"><label><span className="sr-only">Search {kind}</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={isVehicles ? "Search registration, company or route" : "Search name or telephone"} /></label><span>{shown} result{shown === 1 ? "" : "s"}</span></div>

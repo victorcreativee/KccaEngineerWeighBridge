@@ -6,5 +6,6 @@ export function readAudit(): AuditEvent[] { if (typeof window === "undefined") r
 export function logAudit(actor: string, role: string, action: string, details: string, reference?: string) {
   if (typeof window === "undefined") return;
   const event: AuditEvent = { id: crypto.randomUUID(), at: new Date().toISOString(), actor, role, action, details, reference };
-  localStorage.setItem(auditKey, JSON.stringify([...readAudit(), event].slice(-1000)));
+  saveSharedData(sharedKeys.auditEvents, [...readAudit(), event].slice(-1000));
 }
+import { saveSharedData, sharedKeys } from "../services/firebase/sharedData";
