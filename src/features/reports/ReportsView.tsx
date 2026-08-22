@@ -3,7 +3,8 @@
 import { ChangeEvent, useMemo, useState } from "react";
 import { exportExcelWorkbook } from "./exportExcelWorkbook";
 
-type Entry = { id: string; facilityId?: string; localTicket?: string; registration: string; vehicleMatched: boolean; vehicleType?: string; division?: string; originArea?: string; operatorCategory?: string; company?: string; concessionaire?: string; driverName: string; driverMatched: boolean; driverPhone: string; routeSource: string; arrivalTime: string; departureTime?: string; grossKg: number; tareKg: number; netKg: number; tareCaptureMode?: "UNCONFIRMED"; status: "OPEN" | "COMPLETED" | "VOIDED"; operationDate: string; completedAt: string };
+type Correction = { correctedAt: string; correctedBy?: string; reason: string; before: Record<string, string>; after: Record<string, string> };
+type Entry = { id: string; facilityId?: string; localTicket?: string; createdBy?: string; createdAt?: string; updatedBy?: string; updatedAt?: string; registration: string; vehicleMatched: boolean; vehicleType?: string; division?: string; originArea?: string; operatorCategory?: string; company?: string; concessionaire?: string; driverName: string; driverMatched: boolean; driverPhone: string; routeSource: string; arrivalTime: string; departureTime?: string; grossKg: number; tareKg: number; netKg: number; tareCaptureMode?: "UNCONFIRMED"; status: "OPEN" | "COMPLETED" | "VOIDED"; operationDate: string; completedAt: string; voidReason?: string; voidedAt?: string; voidedBy?: string; correctionHistory?: Correction[] };
 const entriesKey = "buyala.local.entries.v1";
 const vehiclesKey = "buyala.local.vehicles.v1";
 const driversKey = "buyala.local.drivers.v1";
@@ -18,6 +19,8 @@ function summarize(entries: Entry[], label: (entry: Entry) => string) {
 }
 function minutesBetween(start: string, end?: string) { if (!end) return null; const [sh, sm] = start.split(":").map(Number); const [eh, em] = end.split(":").map(Number); const minutes = eh * 60 + em - (sh * 60 + sm); return minutes >= 0 ? minutes : minutes + 1440; }
 function inclusiveDays(from: string, to: string) { return Math.max(1, Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000) + 1); }
+function shiftDate(value: string, days: number) { const date = new Date(`${value}T00:00:00Z`); date.setUTCDate(date.getUTCDate() + days); return date.toISOString().slice(0, 10); }
+function percentageChange(current: number, previous: number) { if (!previous) return null; return ((current - previous) / previous) * 100; }
 
 export function ReportsView() {
   const [entries] = useState<Entry[]>(readEntries);
@@ -37,6 +40,12 @@ export function ReportsView() {
   const unknownVehicles = completed.filter((entry) => !entry.vehicleMatched).length;
   const unknownDrivers = completed.filter((entry) => !entry.driverMatched).length;
   const days = inclusiveDays(fromDate, toDate);
+  const previousTo = shiftDate(fromDate, -1);
+  const previousFrom = shiftDate(fromDate, -days);
+  const previousCompleted = useMemo(() => entries.filter((entry) => entry.status === "COMPLETED" && entry.operationDate >= previousFrom && entry.operationDate <= previousTo), [entries, previousFrom, previousTo]);
+  const previousNet = previousCompleted.reduce((sum, entry) => sum + entry.netKg, 0);
+  const netChange = percentageChange(totalNet, previousNet);
+  const tripChange = percentageChange(completed.length, previousCompleted.length);
   const activeDays = new Set(completed.map((entry) => entry.operationDate)).size;
   const turnaroundValues = completed.map((entry) => minutesBetween(entry.arrivalTime, entry.departureTime)).filter((value): value is number => value !== null);
   const averageTurnaround = turnaroundValues.length ? turnaroundValues.reduce((sum, value) => sum + value, 0) / turnaroundValues.length : null;
@@ -63,7 +72,7 @@ export function ReportsView() {
     const start = new Date(`${today}T00:00:00`); start.setDate(start.getDate() - 6); setFromDate(start.toISOString().slice(0, 10)); setToDate(today);
   }
 
-  async function downloadExcel() { setExportMessage("Preparing styled Excel workbook…"); try { await exportExcelWorkbook(entries, fromDate, toDate); setExportMessage(`Excel workbook downloaded with 6 sheets and ${completed.length} selected transaction${completed.length === 1 ? "" : "s"}.`); } catch { setExportMessage("The Excel workbook could not be created. Your saved data was not changed."); } }
+  async function downloadExcel() { setExportMessage("Preparing styled Excel workbook…"); try { await exportExcelWorkbook(entries, fromDate, toDate); setExportMessage(`Excel workbook downloaded with 8 sheets, ${completed.length} completed transaction${completed.length === 1 ? "" : "s"}, and the selected period's audit history.`); } catch { setExportMessage("The Excel workbook could not be created. Your saved data was not changed."); } }
 
   function printReport() { setExportMessage("Opening the print dialog. Choose ‘Save as PDF’ in the printer destination to save a PDF copy."); window.setTimeout(() => window.print(), 150); }
 
@@ -91,6 +100,7 @@ export function ReportsView() {
     <header className="print-report-header"><p>BUYALA WASTE MANAGEMENT FACILITY</p><h1>Weighbridge Operations Report</h1><span>{fromDate === toDate ? displayDate(fromDate) : `${displayDate(fromDate)} – ${displayDate(toDate)}`}</span></header>
     <div className="report-kpis"><article><span>Total vehicles</span><strong>{completed.length}</strong></article><article><span>Net waste</span><strong>{(totalNet / 1000).toFixed(2)} <small>t</small></strong></article><article><span>KCCA direct</span><strong>{kccaDirect}</strong></article><article><span>Concessionaires</span><strong>{concessionaires}</strong></article><article><span>Non-concessionaires</span><strong>{nonConcessionaires}</strong></article><article className={unknownVehicles + unknownDrivers ? "warning" : ""}><span>Unknown records</span><strong>{unknownVehicles + unknownDrivers}</strong><small>{unknownVehicles} vehicles · {unknownDrivers} drivers</small></article></div>
     <section className="efficiency-strip" aria-label="Operational efficiency"><article><span>Tonnes per trip</span><strong>{completed.length ? (totalNet / 1000 / completed.length).toFixed(2) : "0.00"}</strong><small>Average completed load</small></article><article><span>Daily average</span><strong>{(totalNet / 1000 / days).toFixed(2)} t</strong><small>{days} calendar day{days === 1 ? "" : "s"} selected</small></article><article><span>Active-day average</span><strong>{activeDays ? (totalNet / 1000 / activeDays).toFixed(2) : "0.00"} t</strong><small>{activeDays} day{activeDays === 1 ? "" : "s"} with completed trips</small></article><article><span>Average turnaround</span><strong>{averageTurnaround === null ? "—" : `${Math.round(averageTurnaround)} min`}</strong><small>{turnaroundValues.length} timed trip{turnaroundValues.length === 1 ? "" : "s"}</small></article></section>
+    <section className="period-comparison"><div><p className="master-kicker">PERIOD COMPARISON</p><h3>Compared with the previous {days === 1 ? "day" : `${days} days`}</h3><small>{displayDate(previousFrom)} – {displayDate(previousTo)}</small></div>{previousCompleted.length ? <div className="comparison-values"><ComparisonMetric label="Net waste" current={`${(totalNet / 1000).toFixed(2)} t`} previous={`${(previousNet / 1000).toFixed(2)} t previously`} change={netChange} /><ComparisonMetric label="Completed trips" current={String(completed.length)} previous={`${previousCompleted.length} previously`} change={tripChange} /><ComparisonMetric label="Daily average" current={`${(totalNet / 1000 / days).toFixed(2)} t`} previous={`${(previousNet / 1000 / days).toFixed(2)} t previously`} change={percentageChange(totalNet / days, previousNet / days)} /></div> : <div className="comparison-empty"><strong>No earlier completed records</strong><p>Comparison will appear automatically when the preceding period contains data.</p></div>}</section>
     <section className="status-strip"><span><b>{periodEntries.filter((entry) => entry.status === "COMPLETED").length}</b> Completed</span><span><b>{periodEntries.filter((entry) => entry.status === "OPEN").length}</b> Open</span><span><b>{periodEntries.filter((entry) => entry.status === "VOIDED").length}</b> Voided</span><small>Transaction status for the selected period</small></section>
     <section className={qualityIssues ? "quality-panel attention" : "quality-panel"}><div><p className="master-kicker">DATA QUALITY</p><h3>{qualityIssues ? `${qualityIssues} details need review` : "All reporting details are complete"}</h3><small>Counts apply to completed transactions in the selected period.</small></div><div className="quality-grid"><span><b>{quality.origin}</b> Missing origin</span><span><b>{quality.division}</b> Missing Kampala division</span><span><b>{quality.operator}</b> Missing operator category</span><span><b>{quality.company}</b> Missing private company</span><span><b>{quality.departure}</b> Missing departure</span><span><b>{quality.unmatched}</b> Unmatched vehicle/driver</span></div></section>
     {!completed.length ? <div className="report-empty"><span>R</span><h3>No completed transactions in this period</h3><p>Choose another date range or complete a transaction in Daily Operations.</p></div> : <>
@@ -108,4 +118,9 @@ export function ReportsView() {
 
 function SummaryTable({ title, description, rows, totalNet }: { title: string; description: string; rows: [string, { vehicles: number; netKg: number }][]; totalNet: number }) {
   return <section className="report-section"><div className="report-section-heading"><div><h3>{title}</h3><p>{description}</p></div><strong>{(totalNet / 1000).toFixed(2)} tonnes</strong></div><div className="division-report-table"><div className="division-report-row header"><span>Category</span><span>Trips</span><span>Tonnes</span><span>Tonnes / trip</span><span>% contribution</span></div>{rows.map(([name, values]) => <div className="division-report-row" key={name}><strong>{name}</strong><span>{values.vehicles}</span><span>{(values.netKg / 1000).toFixed(2)}</span><span>{values.vehicles ? (values.netKg / 1000 / values.vehicles).toFixed(2) : "0.00"}</span><span>{totalNet ? `${(values.netKg / totalNet * 100).toFixed(1)}%` : "0.0%"}</span></div>)}</div></section>;
+}
+
+function ComparisonMetric({ label, current, previous, change }: { label: string; current: string; previous: string; change: number | null }) {
+  const direction = change === null || Math.abs(change) < 0.05 ? "same" : change > 0 ? "up" : "down";
+  return <article><span>{label}</span><strong>{current}</strong><small>{previous}</small><b className={direction}>{change === null ? "No baseline" : `${change > 0 ? "↑" : change < 0 ? "↓" : ""} ${Math.abs(change).toFixed(1)}%`}</b></article>;
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { MasterDataView } from "../src/features/master-data/MasterDataView";
 import { OperationsFlow } from "../src/features/operations/OperationsFlow";
 import { ConnectionStatus } from "../src/components/ConnectionStatus";
@@ -19,16 +19,30 @@ const clerkNavItems = ["Dashboard", "Daily Operations", "Records", "Vehicles", "
 function readSession(): LocalUser | null { if (typeof window === "undefined") return null; try { return JSON.parse(sessionStorage.getItem("buyala.local.session.v1") ?? "null") as LocalUser | null; } catch { return null; } }
 export default function Home() {
   const [active, setActive] = useState("Dashboard");
-  const [user, setUser] = useState<LocalUser | null>(readSession);
+  const [user, setUser] = useState<LocalUser | null>(null);
+  const [sessionReady, setSessionReady] = useState(false);
   const [loginError, setLoginError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showMobileMore, setShowMobileMore] = useState(false);
   const [quickAdd, setQuickAdd] = useState<{ kind: "vehicles" | "drivers"; value: string } | null>(null);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const restored = readSession();
+      if (restored) {
+        setUser(restored);
+        setActive(restored.mustChangePassword ? "My Account" : restored.role === "Data Clerk" ? "Daily Operations" : "Dashboard");
+      }
+      setSessionReady(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   function signIn(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setLoginError(""); const data = new FormData(event.currentTarget); const username = String(data.get("username") ?? "").trim().toLowerCase(); const password = String(data.get("password") ?? ""); const account = readLocalAccounts().find((item) => item.username === username && item.password === password && item.active); if (!account) return setLoginError("Username or password is incorrect, or this account is inactive."); const nextUser: LocalUser = { username: account.username, name: account.name, role: account.role, initials: account.initials, mustChangePassword: account.mustChangePassword }; sessionStorage.setItem("buyala.local.session.v1", JSON.stringify(nextUser)); logAudit(nextUser.name, nextUser.role, "SIGN_IN", "Signed in to the local pilot", nextUser.username); setUser(nextUser); setActive(account.mustChangePassword ? "My Account" : account.role === "Data Clerk" ? "Daily Operations" : "Dashboard"); }
   function signOut() { if (user) logAudit(user.name, user.role, "SIGN_OUT", "Signed out of the local pilot"); sessionStorage.removeItem("buyala.local.session.v1"); setUser(null); setActive("Dashboard"); setShowMobileMore(false); }
   function passwordChanged() { if (!user) return; const nextUser = { ...user, mustChangePassword: false }; sessionStorage.setItem("buyala.local.session.v1", JSON.stringify(nextUser)); setUser(nextUser); setActive(nextUser.role === "Data Clerk" ? "Daily Operations" : "Dashboard"); }
 
+  if (!sessionReady) return <main className="session-loading" aria-label="Opening Buyala"><span className="brand-mark large" aria-hidden="true">B</span><p>Opening Buyala…</p></main>;
   if (!user) {
     return (
       <main className="access-page">
