@@ -13,9 +13,11 @@ import { AccountManagementView } from "../src/features/accounts/AccountManagemen
 import { MyAccountView } from "../src/features/accounts/MyAccountView";
 import { observeUser, signIn as firebaseSignIn, signOut as firebaseSignOut } from "../src/services/firebase/auth";
 import { hydrateSharedData, subscribeSharedData } from "../src/services/firebase/sharedData";
+import { AppSettingsView } from "../src/features/settings/AppSettingsView";
 
-type LocalUser = { uid: string; username: string; name: string; role: "Data Clerk" | "Engineer"; initials: string; mustChangePassword?: boolean };
-const allNavItems = ["Dashboard", "Daily Operations", "Records", "Reports", "Vehicles", "Drivers", "Audit Log", "My Account"];
+type LocalUser = { uid: string; username: string; name: string; role: "Data Clerk" | "Engineer" | "System Admin"; initials: string; mustChangePassword?: boolean };
+const adminNavItems = ["Dashboard", "Daily Operations", "Records", "Reports", "Vehicles", "Drivers", "User Accounts", "Audit Log", "App Settings", "My Account"];
+const engineerNavItems = ["Dashboard", "Daily Operations", "Records", "Reports", "Vehicles", "Drivers", "User Accounts", "My Account"];
 const clerkNavItems = ["Dashboard", "Daily Operations", "Records", "Vehicles", "Drivers", "My Account"];
 export default function Home() {
   const [active, setActive] = useState("Dashboard");
@@ -62,7 +64,7 @@ export default function Home() {
             <p className="access-copy">Use your assigned Buyala account.</p>
             <form className="local-login-form" onSubmit={signIn}><label>Username<input name="username" autoComplete="username" required /></label><label>Password<div className="password-field"><input name="password" type={showPassword ? "text" : "password"} autoComplete="current-password" required /><button type="button" onClick={() => setShowPassword((shown) => !shown)}>{showPassword ? "Hide" : "Show"}</button></div></label>{loginError && <p className="login-error" role="alert">{loginError}</p>}<button className="access-button" type="submit">Sign in <span aria-hidden="true">→</span></button></form>
             <div className="local-access-note"><span aria-hidden="true">i</span><p><strong>Firebase Authentication</strong>Your password and role now follow your account securely across connected devices.</p></div>
-            <div className="account-role-preview"><span><b>Data Clerk</b>Daily entry and operational records</span><span><b>Engineer</b>Full oversight, reports and audited corrections</span></div>
+            <div className="account-role-preview"><span><b>Data Clerk</b>Daily entry and operational records</span><span><b>Engineer</b>Operations, reports and staff accounts</span><span><b>System Admin</b>Full access and technical administration</span></div>
             <p className="access-footer">No public registration · Assigned staff accounts only</p>
           </div>
         </section>
@@ -70,8 +72,8 @@ export default function Home() {
     );
   }
   if (user.mustChangePassword) return <MyAccountView user={user} forced onPasswordChanged={passwordChanged} onSignOut={signOut} />;
-  const navItems = user.role === "Engineer" ? allNavItems : clerkNavItems;
-  const moreItems = navItems.filter((item) => ["Reports", "Vehicles", "Drivers", "User Accounts", "Audit Log", "My Account"].includes(item));
+  const navItems = user.role === "System Admin" ? adminNavItems : user.role === "Engineer" ? engineerNavItems : clerkNavItems;
+  const moreItems = navItems.filter((item) => ["Reports", "Vehicles", "Drivers", "User Accounts", "Audit Log", "App Settings", "My Account"].includes(item));
   return (
     <div className="app-shell">
       <aside className="sidebar" aria-label="Primary navigation">
@@ -88,20 +90,22 @@ export default function Home() {
           {active === "Daily Operations" ? (
             <OperationsFlow operatorName={user.name} onAddVehicle={(value) => { setQuickAdd({ kind: "vehicles", value }); setActive("Vehicles"); }} onAddDriver={(value) => { setQuickAdd({ kind: "drivers", value }); setActive("Drivers"); }} />
           ) : active === "Records" ? (
-            <RecordsView canManage={user.role === "Engineer"} actorName={user.name} onContinueEntry={(id) => { localStorage.setItem("buyala.local.resumeEntryId", id); setActive("Daily Operations"); }} />
+            <RecordsView canManage={user.role !== "Data Clerk"} actorName={user.name} onContinueEntry={(id) => { localStorage.setItem("buyala.local.resumeEntryId", id); setActive("Daily Operations"); }} />
           ) : active === "Vehicles" || active === "Drivers" ? (
             <MasterDataView kind={active === "Vehicles" ? "vehicles" : "drivers"} autoOpen={quickAdd?.kind === (active === "Vehicles" ? "vehicles" : "drivers")} initialValue={quickAdd?.value ?? ""} onQuickAddClosed={() => setQuickAdd(null)} onSaved={() => { setQuickAdd(null); setActive("Daily Operations"); }} />
           ) : active === "Reports" ? (
             <ReportsView />
           ) : active === "Audit Log" ? (
             <AuditLogView />
+          ) : active === "App Settings" ? (
+            <AppSettingsView />
           ) : active === "User Accounts" ? (
             <AccountManagementView engineerName={user.name} />
           ) : active === "My Account" ? (
             <MyAccountView user={user} onPasswordChanged={passwordChanged} />
           ) : <DashboardView onRecordVehicle={() => setActive("Daily Operations")} onViewRecords={() => setActive("Records")} />}
         </section>
-        {showMobileMore && <><button className="mobile-more-scrim" aria-label="Close more menu" onClick={() => setShowMobileMore(false)} /><section className="mobile-more-sheet" role="dialog" aria-modal="true" aria-labelledby="mobile-more-title"><div className="mobile-more-heading"><div><p>{user.role}</p><h2 id="mobile-more-title">More</h2></div><button aria-label="Close menu" onClick={() => setShowMobileMore(false)}>×</button></div>{moreItems.map((item) => <button key={item} className={active === item ? "selected" : ""} onClick={() => { setActive(item); setShowMobileMore(false); }}><span className="more-icon" aria-hidden="true">{item.charAt(0)}</span><span><strong>{item}</strong><small>{item === "Reports" ? "Daily and date-range summaries" : item === "Vehicles" ? "Vehicle database and defaults" : item === "Drivers" ? "Driver names and telephone numbers" : item === "User Accounts" ? "Local access and password resets" : item === "My Account" ? "Change your own password" : "Account and operational activity"}</small></span><b aria-hidden="true">›</b></button>)}<button className="mobile-sign-out" onClick={signOut}><span className="more-icon">S</span><span><strong>Sign out</strong><small>End this local session</small></span><b>›</b></button></section></>}
+        {showMobileMore && <><button className="mobile-more-scrim" aria-label="Close more menu" onClick={() => setShowMobileMore(false)} /><section className="mobile-more-sheet" role="dialog" aria-modal="true" aria-labelledby="mobile-more-title"><div className="mobile-more-heading"><div><p>{user.role}</p><h2 id="mobile-more-title">More</h2></div><button aria-label="Close menu" onClick={() => setShowMobileMore(false)}>×</button></div>{moreItems.map((item) => <button key={item} className={active === item ? "selected" : ""} onClick={() => { setActive(item); setShowMobileMore(false); }}><span className="more-icon" aria-hidden="true">{item.charAt(0)}</span><span><strong>{item}</strong><small>{item === "Reports" ? "Daily and date-range summaries" : item === "Vehicles" ? "Vehicle database and defaults" : item === "Drivers" ? "Driver names and telephone numbers" : item === "User Accounts" ? "Firebase staff accounts and access" : item === "App Settings" ? "Installation, synchronization and offline tools" : item === "My Account" ? "Change your own password" : "Account and operational activity"}</small></span><b aria-hidden="true">›</b></button>)}<button className="mobile-sign-out" onClick={signOut}><span className="more-icon">S</span><span><strong>Sign out</strong><small>End this local session</small></span><b>›</b></button></section></>}
         <nav className="mobile-nav" aria-label="Mobile navigation">
           {["Dashboard", "Daily Operations", "Records"].map((item) => <button key={item} className={active === item ? "active" : ""} onClick={() => { setActive(item); setShowMobileMore(false); }}><span>{item.charAt(0)}</span>{item === "Daily Operations" ? "Operations" : item}</button>)}
           <button className={showMobileMore || moreItems.includes(active) ? "active" : ""} onClick={() => setShowMobileMore(true)} aria-haspopup="dialog" aria-expanded={showMobileMore}><span>•••</span>More</button>

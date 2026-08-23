@@ -17,12 +17,14 @@ const collectionForKey: Record<SharedKey, string> = {
   [sharedKeys.auditEvents]: "auditEvents",
 };
 const pendingKey = "buyala.sync.pending.v1";
+const lastSyncedKey = "buyala.sync.lastSuccessful.v1";
 
 function pendingTokens() { try { const value = JSON.parse(localStorage.getItem(pendingKey) ?? "[]") as string[]; return Array.isArray(value) ? value : []; } catch { return []; } }
 function publishPending(tokens: string[]) { localStorage.setItem(pendingKey, JSON.stringify(tokens)); window.dispatchEvent(new CustomEvent("buyala:sync-status", { detail: { pending: tokens.length } })); }
 function beginPending(key: SharedKey) { const token = `${key}:${crypto.randomUUID()}`; publishPending([...pendingTokens(), token]); return token; }
-function finishPending(token: string) { publishPending(pendingTokens().filter((item) => item !== token)); }
+function finishPending(token: string) { const remaining = pendingTokens().filter((item) => item !== token); publishPending(remaining); if (!remaining.length) { localStorage.setItem(lastSyncedKey, new Date().toISOString()); window.dispatchEvent(new Event("buyala:sync-status")); } }
 export function getPendingSyncCount() { return typeof window === "undefined" ? 0 : pendingTokens().length; }
+export function getLastSuccessfulSync() { return typeof window === "undefined" ? null : localStorage.getItem(lastSyncedKey); }
 
 function readLocal(key: SharedKey): SharedRecord[] {
   try { const parsed = JSON.parse(localStorage.getItem(key) ?? "[]") as SharedRecord[]; return Array.isArray(parsed) ? parsed : []; } catch { return []; }
@@ -40,8 +42,8 @@ async function upload(key: SharedKey, records: SharedRecord[]) {
   finishPending(token);
 }
 
-export async function hydrateSharedData(role: "Data Clerk" | "Engineer") {
-  const keys = (Object.values(sharedKeys) as SharedKey[]).filter((key) => role === "Engineer" || key !== sharedKeys.auditEvents);
+export async function hydrateSharedData(role: "Data Clerk" | "Engineer" | "System Admin") {
+  const keys = (Object.values(sharedKeys) as SharedKey[]).filter((key) => role === "System Admin" || key !== sharedKeys.auditEvents);
   await Promise.all(keys.map(async (key) => {
     try {
       const snapshot = await getDocs(collection(firestore, collectionForKey[key]));
@@ -53,9 +55,9 @@ export async function hydrateSharedData(role: "Data Clerk" | "Engineer") {
   }));
 }
 
-export function subscribeSharedData(role: "Data Clerk" | "Engineer") {
+export function subscribeSharedData(role: "Data Clerk" | "Engineer" | "System Admin") {
   const stops: Unsubscribe[] = [];
-  (Object.values(sharedKeys) as SharedKey[]).filter((key) => role === "Engineer" || key !== sharedKeys.auditEvents).forEach((key) => {
+  (Object.values(sharedKeys) as SharedKey[]).filter((key) => role === "System Admin" || key !== sharedKeys.auditEvents).forEach((key) => {
     stops.push(onSnapshot(collection(firestore, collectionForKey[key]), (snapshot) => {
       if (!snapshot.metadata.fromCache || snapshot.docs.length) storeLocal(key, snapshot.docs.map((item) => item.data() as SharedRecord));
     }, () => undefined));
@@ -67,4 +69,14 @@ export function subscribeSharedData(role: "Data Clerk" | "Engineer") {
 export function saveSharedData<T extends { id: string }>(key: SharedKey, records: T[]) {
   storeLocal(key, records as SharedRecord[]);
   void upload(key, records as SharedRecord[]).catch(() => undefined);
+}
+
+export async function synchronizeNow(role: "Data Clerk" | "Engineer" | "System Admin") {
+  if (!navigator.onLine) throw new Error("OFFLINE");
+  await waitForPendingWrites(firestore);
+  await hydrateSharedData(role);
+  await waitForPendingWrites(firestore);
+  publishPending([]);
+  localStorage.setItem(lastSyncedKey, new Date().toISOString());
+  window.dispatchEvent(new Event("buyala:sync-status"));
 }

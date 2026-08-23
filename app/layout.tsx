@@ -23,6 +23,9 @@ import "./record-correction.css";
 import "./audit.css";
 import "./accounts.css";
 import "./my-account.css";
+import "./settings.css";
+import "./readiness.css";
+import "./desktop-downloads.css";
 import { PwaRegister } from "../src/components/PwaRegister";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });

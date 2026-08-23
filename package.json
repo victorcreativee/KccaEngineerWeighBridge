@@ -1,7 +1,10 @@
 {
   "name": "buyala-waste-operations",
-  "version": "0.1.0",
+  "version": "0.2.0",
+  "description": "Offline-capable weighbridge operations for Buyala Waste Management Facility.",
+  "author": "Buyala Waste Management Facility",
   "private": true,
+  "main": "desktop/main.js",
   "engines": {
     "node": ">=22.13.0"
   },
@@ -13,7 +16,9 @@
     "firebase:deploy": "npm run firebase:prepare && firebase deploy --only hosting",
     "test": "npm run build && node --test tests/rendered-html.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern firebase-public",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "desktop:mac": "electron-builder --mac dmg zip --x64",
+    "desktop:windows": "electron-builder --win nsis portable --x64"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",
@@ -34,6 +39,8 @@
     "@vitejs/plugin-react": "6.0.2",
     "@vitejs/plugin-rsc": "0.5.26",
     "drizzle-kit": "0.31.10",
+    "electron": "^43.4.1",
+    "electron-builder": "^26.15.3",
     "eslint": "9.39.4",
     "eslint-plugin-jsx-a11y": "6.10.2",
     "eslint-plugin-react": "7.37.5",
@@ -47,5 +54,16 @@
     "vite": "8.0.13",
     "wrangler": "4.92.0"
   },
-  "type": "module"
+  "type": "module",
+  "build": {
+    "appId": "app.buyalaweighbridge.desktop",
+    "productName": "Buyala Waste Operations",
+    "artifactName": "Buyala-Waste-Operations-${version}-${os}-${arch}.${ext}",
+    "directories": { "output": "desktop-release" },
+    "files": ["desktop/main.js", "package.json"],
+    "asar": true,
+    "mac": { "category": "public.app-category.business", "target": ["dmg", "zip"] },
+    "win": { "target": ["nsis", "portable"] },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true }
+  }
 }

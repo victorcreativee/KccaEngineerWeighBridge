@@ -1,8 +1,9 @@
 import { onAuthStateChanged, reauthenticateWithCredential, signInWithEmailAndPassword, signOut as firebaseSignOut, EmailAuthProvider, updatePassword, type User } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { firebaseAuth, firestore } from "./client";
 
-export type FirebaseUserProfile = { uid: string; username: string; name: string; role: "Data Clerk" | "Engineer"; initials: string; active: boolean; mustChangePassword?: boolean };
+export type StaffRole = "Data Clerk" | "Engineer" | "System Admin";
+export type FirebaseUserProfile = { uid: string; username: string; name: string; role: StaffRole; initials: string; active: boolean; mustChangePassword?: boolean };
 
 function emailFor(username: string) { return `${username.trim().toLowerCase()}@buyalaweighbridge.app`; }
 
@@ -33,4 +34,6 @@ export async function changeOwnPassword(currentPassword: string, newPassword: st
   if (!user?.email) throw new Error("NOT_SIGNED_IN");
   await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, currentPassword));
   await updatePassword(user, newPassword);
+  try { await updateDoc(doc(firestore, "profiles", user.uid), { mustChangePassword: false }); }
+  catch { throw new Error("PASSWORD_CHANGED_PROFILE_PENDING"); }
 }

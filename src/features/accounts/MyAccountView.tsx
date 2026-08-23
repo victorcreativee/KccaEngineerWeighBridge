@@ -4,7 +4,7 @@ import { FormEvent, useState } from "react";
 import { logAudit } from "../../utils/localAudit";
 import { changeOwnPassword } from "../../services/firebase/auth";
 
-type AccountUser = { username: string; name: string; role: "Data Clerk" | "Engineer"; initials: string };
+type AccountUser = { username: string; name: string; role: "Data Clerk" | "Engineer" | "System Admin"; initials: string };
 
 export function MyAccountView({ user, forced = false, onPasswordChanged, onSignOut }: { user: AccountUser; forced?: boolean; onPasswordChanged: () => void; onSignOut?: () => void }) {
   const [error, setError] = useState("");
@@ -24,14 +24,14 @@ export function MyAccountView({ user, forced = false, onPasswordChanged, onSignO
     if (newPassword !== confirmation) return setError("The two new passwords do not match.");
     setSaving(true);
     try { await changeOwnPassword(currentPassword, newPassword); logAudit(user.name, user.role, "PASSWORD_CHANGED", "Changed their Firebase account password", user.username); form.reset(); onPasswordChanged(); }
-    catch { setError(navigator.onLine ? "The current password is incorrect, or Firebase could not update it." : "Connect to the internet before changing your Firebase password."); }
+    catch (caught) { setError(!navigator.onLine ? "Connect to the internet before changing your Firebase password." : caught instanceof Error && caught.message === "PASSWORD_CHANGED_PROFILE_PENDING" ? "Your password changed, but the account screen could not finish updating. Sign out and use the new password, then try once more." : "The current password is incorrect, or Firebase could not update it."); }
     finally { setSaving(false); }
   }
 
   return <div className={forced ? "my-account-page forced" : "my-account-page"}>
     <section className="my-account-card">
       <div className="my-account-identity"><span>{user.initials}</span><div><p>{user.role}</p><h2>{forced ? "Create your private password" : "My account"}</h2><small>{user.name} · @{user.username}</small></div></div>
-      {forced && <div className="temporary-password-notice"><strong>Password change required</strong><p>An Engineer gave you a temporary password. Replace it before opening operational records.</p></div>}
+      {forced && <div className="temporary-password-notice"><strong>Password change required</strong><p>A System Admin gave you a temporary password. Replace it before opening operational records.</p></div>}
       {!forced && <p className="my-account-intro">Change your Firebase password. The new password will work on every connected device.</p>}
       <form onSubmit={changePassword}>
         <label>{forced ? "Temporary password" : "Current password"}<input name="currentPassword" type={showPasswords ? "text" : "password"} required autoComplete="current-password" /></label>

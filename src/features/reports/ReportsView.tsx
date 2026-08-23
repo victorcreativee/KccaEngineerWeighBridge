@@ -9,7 +9,11 @@ type Entry = { id: string; facilityId?: string; localTicket?: string; createdBy?
 const entriesKey = "buyala.local.entries.v1";
 const vehiclesKey = "buyala.local.vehicles.v1";
 const driversKey = "buyala.local.drivers.v1";
+const auditKey = "buyala.local.audit.v1";
 function readEntries(): Entry[] { if (typeof window === "undefined") return []; try { return JSON.parse(localStorage.getItem(entriesKey) ?? "[]") as Entry[]; } catch { return []; } }
+function readArray(key: string): { id: string }[] { try { const value = JSON.parse(localStorage.getItem(key) ?? "[]") as unknown; return Array.isArray(value) ? value.filter((item): item is { id: string } => Boolean(item && typeof item === "object" && typeof (item as { id?: unknown }).id === "string")) : []; } catch { return []; } }
+function fullBackup() { return { schemaVersion: 2, application: "Buyala Waste Operations", exportedAt: new Date().toISOString(), vehicles: readArray(vehiclesKey), drivers: readArray(driversKey), entries: readArray(entriesKey), auditEvents: readArray(auditKey) }; }
+function mergeById(current: { id: string }[], restored: { id: string }[]) { const records = new Map(current.map((item) => [item.id, item])); restored.forEach((item) => records.set(item.id, item)); return [...records.values()]; }
 function displayDate(value: string) { return new Intl.DateTimeFormat("en-UG", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(`${value}T00:00:00`)); }
 function downloadFile(blob: Blob, filename: string) { const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = filename; anchor.style.display = "none"; document.body.appendChild(anchor); anchor.click(); anchor.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 2000); }
 function operatorCategory(entry: Entry) { return entry.operatorCategory || (entry.concessionaire === "Yes" ? "Concessionaire" : entry.concessionaire === "No" ? "Non-concessionaire" : "Unconfirmed"); }
@@ -78,18 +82,25 @@ export function ReportsView() {
   function printReport() { setExportMessage("Opening the print dialog. Choose ‘Save as PDF’ in the printer destination to save a PDF copy."); window.setTimeout(() => window.print(), 150); }
 
   function downloadBackup() {
-    const backup = { schemaVersion: 1, application: "Buyala Waste Operations", exportedAt: new Date().toISOString(), vehicles: JSON.parse(localStorage.getItem(vehiclesKey) ?? "[]"), drivers: JSON.parse(localStorage.getItem(driversKey) ?? "[]"), entries: JSON.parse(localStorage.getItem(entriesKey) ?? "[]") };
-    downloadFile(new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" }), `buyala-local-backup-${today}.json`); setBackupMessage("Backup downloaded. Store the file in your KccaEngineer folder or another safe location.");
+    downloadFile(new Blob([JSON.stringify(fullBackup(), null, 2)], { type: "application/json" }), `buyala-full-backup-${today}.json`); setBackupMessage("Version 2 full backup downloaded with vehicles, drivers, transactions and audit history.");
   }
 
   async function restoreBackup(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]; event.target.value = ""; if (!file) return;
     try {
-      const backup = JSON.parse(await file.text()) as { schemaVersion?: number; application?: string; vehicles?: unknown; drivers?: unknown; entries?: unknown };
-      if (backup.schemaVersion !== 1 || backup.application !== "Buyala Waste Operations" || !Array.isArray(backup.vehicles) || !Array.isArray(backup.drivers) || !Array.isArray(backup.entries)) throw new Error("invalid");
-      const approved = window.confirm(`Restore this backup?\n\n${backup.vehicles.length} vehicles\n${backup.drivers.length} drivers\n${backup.entries.length} transactions\n\nThis will replace the data currently saved in this browser.`);
+      const backup = JSON.parse(await file.text()) as { schemaVersion?: number; application?: string; vehicles?: unknown; drivers?: unknown; entries?: unknown; auditEvents?: unknown };
+      const versionSupported = backup.schemaVersion === 1 || backup.schemaVersion === 2;
+      if (!versionSupported || backup.application !== "Buyala Waste Operations" || !Array.isArray(backup.vehicles) || !Array.isArray(backup.drivers) || !Array.isArray(backup.entries) || (backup.schemaVersion === 2 && !Array.isArray(backup.auditEvents))) throw new Error("invalid");
+      const collections = [backup.vehicles, backup.drivers, backup.entries, ...(backup.schemaVersion === 2 ? [backup.auditEvents as unknown[]] : [])];
+      if (collections.some((records) => records.some((item) => !item || typeof item !== "object" || typeof (item as { id?: unknown }).id !== "string"))) throw new Error("invalid");
+      const approved = window.confirm(`Restore this backup safely?\n\n${backup.vehicles.length} vehicles\n${backup.drivers.length} drivers\n${backup.entries.length} transactions${backup.schemaVersion === 2 ? `\n${(backup.auditEvents as unknown[]).length} audit events` : ""}\n\nBacked-up records will be restored or updated. Other protected Firebase history will not be deleted.`);
       if (!approved) return setBackupMessage("Restore cancelled. Current local data was not changed.");
-      saveSharedData(sharedKeys.vehicles, backup.vehicles as { id: string }[]); saveSharedData(sharedKeys.drivers, backup.drivers as { id: string }[]); saveSharedData(sharedKeys.entries, backup.entries as { id: string }[]); window.setTimeout(() => window.location.reload(), 500);
+      downloadFile(new Blob([JSON.stringify(fullBackup(), null, 2)], { type: "application/json" }), `buyala-before-restore-${new Date().toISOString().replaceAll(":", "-").slice(0, 19)}.json`);
+      saveSharedData(sharedKeys.vehicles, mergeById(readArray(vehiclesKey), backup.vehicles as { id: string }[]));
+      saveSharedData(sharedKeys.drivers, mergeById(readArray(driversKey), backup.drivers as { id: string }[]));
+      saveSharedData(sharedKeys.entries, mergeById(readArray(entriesKey), backup.entries as { id: string }[]));
+      if (backup.schemaVersion === 2) saveSharedData(sharedKeys.auditEvents, mergeById(readArray(auditKey), backup.auditEvents as { id: string }[]));
+      setBackupMessage("Backup restored safely. A pre-restore safety copy was downloaded automatically. Reloading…"); window.setTimeout(() => window.location.reload(), 900);
     } catch { setBackupMessage("This file is not a valid Buyala local backup. No data was changed."); }
   }
 
@@ -112,7 +123,7 @@ export function ReportsView() {
       <section className="report-section"><div className="report-section-heading"><div><h3>Weight totals</h3><p>Reconciliation for selected period</p></div></div><div className="weight-totals"><div><span>Total gross</span><strong>{totalGross.toLocaleString()} kg</strong></div><i>−</i><div><span>Total tare</span><strong>{totalTare.toLocaleString()} kg</strong></div><i>=</i><div className="net"><span>Total net</span><strong>{totalNet.toLocaleString()} kg</strong><small>{(totalNet / 1000).toFixed(2)} tonnes</small></div></div></section>
       <section className="report-section detailed-log"><div className="report-section-heading"><div><h3>Detailed transaction log</h3><p>{completed.length} completed transaction{completed.length === 1 ? "" : "s"}</p></div></div><div className="report-log-table"><div className="report-log-row header"><span>Date</span><span>Registration</span><span>Division</span><span>Driver</span><span>Route</span><span>Gross</span><span>Tare</span><span>Net</span></div>{completed.map((entry) => <div className="report-log-row" key={entry.id}><span>{displayDate(entry.operationDate)}<small>{entry.arrivalTime}</small></span><strong>{entry.registration}</strong><span>{entry.division || "Unconfirmed"}</span><span>{entry.driverName}{!entry.driverMatched && <small>Unmatched</small>}</span><span>{entry.routeSource}</span><span>{entry.grossKg.toLocaleString()}</span><span>{entry.tareKg.toLocaleString()}</span><strong>{entry.netKg.toLocaleString()}</strong></div>)}</div></section>
     </>}
-    <section className="local-backup-panel"><div><p className="master-kicker">LOCAL DATA PROTECTION</p><h3>Backup and restore</h3><p>Download vehicles, drivers and transactions as one file. Keep it in the KccaEngineer folder or another safe location.</p></div><div className="backup-actions"><button onClick={downloadBackup}>Download full backup</button><label>Restore backup<input type="file" accept="application/json,.json" onChange={restoreBackup} /></label></div>{backupMessage && <p className="backup-message" role="status">{backupMessage}</p>}<small>Restoring requires confirmation and replaces the records currently stored in this browser. It does not affect project source files.</small></section>
+    <section className="local-backup-panel"><div><p className="master-kicker">LOCAL DATA PROTECTION</p><h3>Backup and restore</h3><p>Download vehicles, drivers, transactions and audit history as one recovery file. Keep it in the KccaEngineer folder or another safe location.</p></div><div className="backup-actions"><button onClick={downloadBackup}>Download full backup</button><label>Restore backup<input type="file" accept="application/json,.json" onChange={restoreBackup} /></label></div>{backupMessage && <p className="backup-message" role="status">{backupMessage}</p>}<small>Restore accepts version 1 and version 2 backups. It merges records safely, keeps protected Firebase history, and downloads a pre-restore safety copy.</small></section>
     <footer className="print-report-footer">Generated locally by Buyala Waste Operations · Figures include completed transactions only.</footer>
   </div>;
 }

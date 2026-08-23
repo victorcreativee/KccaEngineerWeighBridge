@@ -2,7 +2,7 @@ import { getApp, getApps, initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, type Firestore } from "firebase/firestore";
 
-const firebaseConfig = {
+export const firebaseConfig = {
   apiKey: "AIzaSyCNeFF1DNZdak4kojVPycx77i87widEhYI",
   authDomain: "buyala-weighbridge.firebaseapp.com",
   projectId: "buyala-weighbridge",
