@@ -1,0 +1,51 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function profile() { return get(/databases/$(database)/documents/profiles/$(request.auth.uid)); }
+    function systemAdmin() { return signedIn() && profile().data.active == true && profile().data.role == "System Admin"; }
+    function engineer() { return signedIn() && profile().data.active == true && (profile().data.role == "Engineer" || profile().data.role == "System Admin"); }
+    function dataClerk() { return signedIn() && profile().data.active == true && profile().data.role == "Data Clerk"; }
+    function activeUser() { return signedIn() && profile().data.active == true; }
+
+    match /profiles/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || engineer());
+      allow create: if systemAdmin() || (engineer() && request.resource.data.role == "Data Clerk");
+      allow update: if systemAdmin()
+        || (engineer() && resource.data.role == "Data Clerk" && request.resource.data.role == "Data Clerk")
+        || (request.auth.uid == uid
+          && activeUser()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["mustChangePassword"])
+          && request.resource.data.mustChangePassword == false);
+      allow delete: if false;
+    }
+    match /entries/{id} {
+      allow read, create: if activeUser();
+      allow update: if engineer() || (dataClerk()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "operationDate", "registration", "driverName", "driverPhone", "originArea",
+          "division", "operatorCategory", "company", "concessionaire", "routeSource",
+          "arrivalTime", "departureTime", "grossKg", "tareKg", "netKg", "status",
+          "completedAt", "updatedAt", "updatedBy", "synchronizedAt", "correctionHistory",
+          "voidReason", "voidedAt", "voidedBy"
+        ])
+        && request.resource.data.updatedAt is string
+        && request.resource.data.updatedBy is string
+        && (
+          (resource.data.status == "OPEN" && (request.resource.data.status == "OPEN" || request.resource.data.status == "COMPLETED"))
+          || (request.resource.data.status == "VOIDED"
+            && request.resource.data.voidReason is string
+            && request.resource.data.voidReason.size() > 0)
+          || (request.resource.data.correctionHistory is list
+            && request.resource.data.correctionHistory.size() > (resource.data.correctionHistory is list ? resource.data.correctionHistory.size() : 0))
+        ));
+      allow delete: if systemAdmin();
+    }
+    match /vehicles/{id} { allow read, create, update: if activeUser(); allow delete: if systemAdmin(); }
+    match /drivers/{id} { allow read, create, update: if activeUser(); allow delete: if systemAdmin(); }
+    match /recoveryEntries/{id} { allow read, create: if activeUser(); allow update: if engineer(); allow delete: if systemAdmin(); }
+    match /auditEvents/{id} { allow create: if activeUser(); allow read: if systemAdmin(); allow update: if false; allow delete: if systemAdmin(); }
+    match /offlineDiagnostics/{id} { allow read, create, delete: if systemAdmin(); allow update: if false; }
+    match /systemState/{id} { allow read: if activeUser(); allow create, update: if systemAdmin(); allow delete: if false; }
+  }
+}

@@ -1,0 +1,8 @@
+.source-matrix-table{overflow:auto}
+.source-matrix-row{display:grid;grid-template-columns:1.25fr repeat(4,1fr);gap:12px;align-items:center;min-width:760px;min-height:48px;padding:0 18px;border-bottom:1px solid #edf0ee;font-size:10px}
+.source-matrix-row.header{background:#f5f8f6;color:#6c7972;text-transform:uppercase;letter-spacing:.04em;font-size:8px;font-weight:900}
+.source-matrix-row span:not(:first-child),.source-matrix-row strong:not(:first-child){text-align:right}
+.source-matrix-row.total{background:#102f27;color:#fff;border:0}
+.source-matrix-row.total strong{font-size:11px}
+@media(max-width:760px){.source-matrix .report-section-heading{align-items:flex-start;gap:10px}.source-matrix .report-section-heading>strong{white-space:nowrap}}
+@media print{.source-matrix-row{min-width:0;padding:5px 8px;font-size:7px}.source-matrix-row.header{font-size:6px}}

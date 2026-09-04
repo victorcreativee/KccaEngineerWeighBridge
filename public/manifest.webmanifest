@@ -1,0 +1,17 @@
+{
+  "name": "Buyala Waste Operations",
+  "short_name": "Buyala",
+  "description": "Weighbridge operations for Buyala Waste Management Facility.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4f7f5",
+  "theme_color": "#176b43",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

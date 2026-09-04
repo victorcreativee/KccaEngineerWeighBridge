@@ -14,7 +14,6 @@ test("server-renders the Buyala operations foundation", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
   const html = await response.text();
   assert.match(html, /Buyala Waste Operations/i);
-  assert.match(html, /Record Vehicle/i);
-  assert.match(html, /SAMPLE DATA/i);
+  assert.match(html, /Opening Buyala/i);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/i);
 });

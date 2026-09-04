@@ -1,8 +1,43 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import "./auth.css";
+import "./master-data.css";
+import "./mobile-menu.css";
+import "./operations.css";
+import "./trip-overrides.css";
+import "./report-source-matrix.css";
+import "./offline.css";
+import "./records.css";
+import "./dashboard.css";
+import "./reports.css";
+import "./record-void.css";
+import "./backup.css";
+import "./master-lifecycle.css";
+import "./master-edit.css";
+import "./open-transactions.css";
+import "./departure.css";
+import "./draft-recovery.css";
+import "./quick-add.css";
+import "./report-export.css";
+import "./report-efficiency.css";
+import "./record-correction.css";
+import "./audit.css";
+import "./accounts.css";
+import "./my-account.css";
+import "./settings.css";
+import "./readiness.css";
+import "./desktop-downloads.css";
+import "./recovery.css";
+import "./reset.css";
+import "./pagination.css";
+import "./performance.css";
+import "./configuration.css";
+import "./login-help.css";
+import "./historical-import.css";
+import { PwaRegister } from "../src/components/PwaRegister";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 export const metadata: Metadata = { title: "Buyala Waste Operations", description: "A fast, reliable weighbridge operations system for Buyala Waste Management Facility." };
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) { return <html lang="en"><body className={`${geistSans.variable} ${geistMono.variable}`}>{children}</body></html>; }
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) { return <html lang="en"><body className={`${geistSans.variable} ${geistMono.variable}`}>{children}<PwaRegister /></body></html>; }

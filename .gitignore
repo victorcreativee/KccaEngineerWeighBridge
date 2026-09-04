@@ -39,3 +39,27 @@ yarn-error.log*
 /.wrangler/
 /outputs/
 /work/
+
+# Generated desktop installers and hosting output (keep desktop/ source)
+/desktop-release/
+/firebase-public/
+/.firebase/
+/qa/
+
+# Operational data, backups and generated client deliverables
+/deliverables/
+*.dmg
+*.exe
+*.msi
+*.asar
+*.app/
+firebase-debug*.log
+firestore-debug*.log
+
+# Private credentials must never be committed
+*serviceAccount*.json
+*service-account*.json
+*.p12
+*.pfx
+# Unused legacy pilot accounts containing embedded demo passwords
+/src/utils/localAccounts.ts
