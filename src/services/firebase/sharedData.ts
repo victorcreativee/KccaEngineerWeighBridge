@@ -22,8 +22,9 @@ const collectionForKey: Record<SharedKey, string> = {
 const pendingKey = "buyala.sync.outbox.v2";
 const lastSyncedKey = "buyala.sync.lastSuccessful.v1";
 const tombstoneKey = "buyala.sync.tombstones.v1";
-const batchSize = 400;
-const networkTimeoutMs = 20000;
+const batchSize = 200;
+const recoveryConcurrency = 12;
+const networkTimeoutMs = 60000;
 let activeFlush: Promise<boolean> | null = null;
 
 type Outbox = Partial<Record<SharedKey, SharedRecord[]>>;
@@ -31,7 +32,7 @@ type Tombstones = Partial<Record<SharedKey, string[]>>;
 function readOutbox(): Outbox { try { const value = JSON.parse(localStorage.getItem(pendingKey) ?? "{}") as Outbox; return value && typeof value === "object" && !Array.isArray(value) ? value : {}; } catch { return {}; } }
 function readTombstones(): Tombstones { try { const value = JSON.parse(localStorage.getItem(tombstoneKey) ?? "{}") as Tombstones; return value && typeof value === "object" && !Array.isArray(value) ? value : {}; } catch { return {}; } }
 function pendingCount(outbox = readOutbox()) { return Object.values(outbox).reduce((sum, records) => sum + (Array.isArray(records) ? records.length : 0), 0); }
-function publishOutbox(outbox: Outbox) { localStorage.setItem(pendingKey, JSON.stringify(outbox)); window.dispatchEvent(new CustomEvent("buyala:sync-status", { detail: { pending: pendingCount(outbox) } })); }
+function publishOutbox(outbox: Outbox, detail: Record<string, unknown> = {}) { localStorage.setItem(pendingKey, JSON.stringify(outbox)); window.dispatchEvent(new CustomEvent("buyala:sync-status", { detail: { pending: pendingCount(outbox), ...detail } })); }
 function queueRecords(key: SharedKey, records: SharedRecord[]) { const outbox = readOutbox(); const queued = new Map((outbox[key] ?? []).map((record) => [record.id, record])); records.forEach((record) => queued.set(record.id, clean(record))); outbox[key] = [...queued.values()]; publishOutbox(outbox); }
 function removeQueuedRecords(key: SharedKey, ids: Set<string>) { if (!ids.size) return; const outbox = readOutbox(); const remaining = (outbox[key] ?? []).filter((record) => !ids.has(record.id)); if (remaining.length) outbox[key] = remaining; else delete outbox[key]; publishOutbox(outbox); }
 export function getPendingSyncCount() { return typeof window === "undefined" ? 0 : pendingCount(); }
@@ -60,6 +61,7 @@ function canonical(value: unknown): string {
   if (value && typeof value === "object") return `{${Object.entries(value as Record<string, unknown>).filter(([key]) => key !== "synchronizedAt").sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(",")}}`;
   return JSON.stringify(value) ?? "undefined";
 }
+function sameRecord(left: unknown, right: unknown) { return canonical(left) === canonical(right); }
 function withTimeout<T>(operation: Promise<T>, label: string) {
   return new Promise<T>((resolve, reject) => {
     const timeout = window.setTimeout(() => reject(new Error(`${label}_TIMEOUT`)), networkTimeoutMs);
@@ -77,6 +79,40 @@ function storeLocal(key: SharedKey, records: SharedRecord[]) {
   window.dispatchEvent(new CustomEvent("buyala:shared-data", { detail: { key } }));
 }
 
+function confirmQueuedRecords(key: SharedKey, sentRecords: SharedRecord[], synchronizedAt: string) {
+  if (!sentRecords.length) return;
+  const sent = new Map(sentRecords.map((record) => [record.id, JSON.stringify(record)]));
+  const current = readOutbox();
+  const remaining = (current[key] ?? []).filter((record) => sent.get(record.id) !== JSON.stringify(record));
+  if (remaining.length) current[key] = remaining; else delete current[key];
+  const originals = new Map(sentRecords.map((record) => [record.id, record]));
+  storeLocal(key, readLocal(key).map((record) => {
+    const original = originals.get(record.id);
+    return original && sameRecord(record, original) ? { ...record, synchronizedAt } : record;
+  }));
+  publishOutbox(current);
+}
+
+async function recoverChunk(key: SharedKey, records: SharedRecord[], synchronizedAt: string) {
+  for (let start = 0; start < records.length; start += recoveryConcurrency) {
+    const group = records.slice(start, start + recoveryConcurrency);
+    const results = await Promise.all(group.map(async (record) => {
+      const reference = doc(firestore, collectionForKey[key], record.id);
+      try {
+        await withTimeout(setDoc(reference, clean({ ...record, synchronizedAt })), "SYNC_RECORD");
+        return record;
+      } catch {
+        // A previous request may have reached Firebase even when its response was lost.
+        try {
+          const existing = await withTimeout(getDoc(reference), "SYNC_VERIFY");
+          return existing.exists() && sameRecord(existing.data(), record) ? record : null;
+        } catch { return null; }
+      }
+    }));
+    confirmQueuedRecords(key, results.filter((record): record is SharedRecord => Boolean(record)), synchronizedAt);
+  }
+}
+
 async function runPendingFlush() {
   if (!navigator.onLine) return false;
   const sending = readOutbox();
@@ -84,46 +120,38 @@ async function runPendingFlush() {
   const work = (Object.entries(sending) as [SharedKey, SharedRecord[]][]).sort(([a], [b]) => priority.indexOf(a) - priority.indexOf(b));
   if (!work.length || !pendingCount(sending)) return true;
   const synchronizedAt = new Date().toISOString();
+  publishOutbox(sending, { syncing: true, total: pendingCount(sending) });
   for (const [key, records] of work) {
-    const confirmed = new Set<string>();
     for (let start = 0; start < records.length; start += batchSize) {
       const chunk = records.slice(start, start + batchSize);
       const batch = writeBatch(firestore);
       chunk.forEach((record) => batch.set(doc(firestore, collectionForKey[key], record.id), clean({ ...record, synchronizedAt })));
       try {
         await withTimeout(batch.commit(), "SYNC_BATCH");
-        chunk.forEach((record) => confirmed.add(record.id));
+        // Persist progress after every successful batch. A later timeout must not
+        // make thousands of already-uploaded records appear pending again.
+        confirmQueuedRecords(key, chunk, synchronizedAt);
       } catch (error) {
         if (!canIsolateRecordError(error)) throw error;
-        // A single invalid/unauthorized record must never block other offline saves.
-        for (const record of chunk) {
-          const reference = doc(firestore, collectionForKey[key], record.id);
-          try { await withTimeout(setDoc(reference, clean({ ...record, synchronizedAt })), "SYNC_RECORD"); confirmed.add(record.id); }
-          catch {
-            // A previous attempt may already have reached Firebase before confirmation was lost.
-            try { const existing = await withTimeout(getDoc(reference), "SYNC_VERIFY"); if (existing.exists() && canonical(existing.data()) === canonical(record)) confirmed.add(record.id); }
-            catch { /* Keep this record queued and retry after its cause is resolved. */ }
-          }
-        }
+        // Isolate invalid/unauthorized records concurrently so one old record
+        // cannot make a large offline backlog take hours to recover.
+        await recoverChunk(key, chunk, synchronizedAt);
       }
     }
-    const current = readOutbox();
-    const sent = new Map(records.filter((record) => confirmed.has(record.id)).map((record) => [record.id, JSON.stringify(record)]));
-    const remaining = (current[key] ?? []).filter((record) => sent.get(record.id) !== JSON.stringify(record));
-    if (remaining.length) current[key] = remaining; else delete current[key];
-    const sentRecords = new Map(records.filter((record) => confirmed.has(record.id)).map((record) => [record.id, record]));
-    storeLocal(key, readLocal(key).map((record) => { const original = sentRecords.get(record.id); return original && record.updatedAt === original.updatedAt ? { ...record, synchronizedAt } : record; }));
-    publishOutbox(current);
   }
   await withTimeout(waitForPendingWrites(firestore), "SYNC_CONFIRMATION");
   const current = readOutbox();
   if (!pendingCount(current)) localStorage.setItem(lastSyncedKey, new Date().toISOString());
+  publishOutbox(current, { syncing: false });
   return !pendingCount(current);
 }
 
 function flushPending() {
   if (activeFlush) return activeFlush;
-  activeFlush = runPendingFlush().finally(() => { activeFlush = null; });
+  activeFlush = runPendingFlush().finally(() => {
+    publishOutbox(readOutbox(), { syncing: false });
+    activeFlush = null;
+  });
   return activeFlush;
 }
 
@@ -142,7 +170,8 @@ function mergeRemote(key: SharedKey, remote: SharedRecord[]) {
   local.forEach((record) => {
     const pending = queued.get(record.id);
     const server = merged.get(record.id);
-    if (pending && server && recordTime(server) > recordTime(pending)) { merged.set(record.id, server); staleQueued.add(record.id); }
+    if (pending && server && sameRecord(server, pending)) { merged.set(record.id, server); staleQueued.add(record.id); }
+    else if (pending && server && recordTime(server) > recordTime(pending)) { merged.set(record.id, server); staleQueued.add(record.id); }
     else if (pending) merged.set(record.id, pending);
     else if (!server || (recordTime(record) > recordTime(server) && JSON.stringify(record) !== JSON.stringify(server))) { merged.set(record.id, record); shouldUpload.push(record); }
   });
@@ -153,7 +182,8 @@ function mergeRemote(key: SharedKey, remote: SharedRecord[]) {
 
 export async function hydrateSharedData(role: "Data Clerk" | "Engineer" | "System Admin") {
     try { const state = await getDoc(doc(firestore, "systemState", "current")); if (state.exists()) { const value = state.data() as { resetAt?: string; clearedCollections?: string[] }; const applied = localStorage.getItem("buyala.reset.appliedAt") ?? ""; if (value.resetAt && value.resetAt > applied) { const resetTime = Date.parse(value.resetAt) || 0; const reverse = Object.fromEntries(Object.entries(collectionForKey).map(([key, name]) => [name, key])); const outbox = readOutbox(); (value.clearedCollections ?? []).forEach((name) => { const key = reverse[name] as SharedKey | undefined; if (!key) return; storeLocal(key, readLocal(key).filter((record) => recordTime(record) > resetTime)); if (outbox[key]) { const current = outbox[key]!.filter((record) => recordTime(record) > resetTime); if (current.length) outbox[key] = current; else delete outbox[key]; } }); publishOutbox(outbox); ["buyala.local.operationDraft.v1", "buyala.local.resumeEntryId", "buyala.offline.test.v1", "buyala.sync.pending.v1"].forEach((key) => localStorage.removeItem(key)); localStorage.setItem("buyala.reset.appliedAt", value.resetAt); } } } catch { /* Reset marker will be checked again on the next connected start. */ }
-  if (navigator.onLine) await flushPending().catch(() => false);
+  // Reconcile with Firebase before uploading. This safely removes records that
+  // reached the server during an earlier attempt whose response was interrupted.
   const keys = (Object.values(sharedKeys) as SharedKey[]).filter((key) => role === "System Admin" || key !== sharedKeys.auditEvents);
   await Promise.all(keys.map(async (key) => {
     try {
@@ -176,7 +206,7 @@ export function subscribeSharedData(role: "Data Clerk" | "Engineer" | "System Ad
     }, () => undefined));
   });
   const reconnect = () => { void synchronizeNow(role).catch(() => undefined); };
-  const retry = window.setInterval(() => { if (navigator.onLine && getPendingSyncCount()) void flushPending().catch(() => undefined); }, 5000);
+  const retry = window.setInterval(() => { if (navigator.onLine && getPendingSyncCount()) void flushPending().catch(() => undefined); }, 15000);
   const visible = () => { if (document.visibilityState === "visible" && navigator.onLine && getPendingSyncCount()) reconnect(); };
   window.addEventListener("online", reconnect);
   document.addEventListener("visibilitychange", visible);
@@ -206,7 +236,6 @@ export async function deleteSharedDataRecords(key: SharedKey, ids: string[]) {
 
 export async function synchronizeNow(role: "Data Clerk" | "Engineer" | "System Admin") {
   if (!navigator.onLine) throw new Error("OFFLINE");
-  await flushPending();
   await hydrateSharedData(role);
   await flushPending();
   if (getPendingSyncCount()) throw new Error("SYNC_PENDING");

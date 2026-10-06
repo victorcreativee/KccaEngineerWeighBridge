@@ -29,15 +29,18 @@ service cloud.firestore {
           "completedAt", "updatedAt", "updatedBy", "synchronizedAt", "correctionHistory",
           "voidReason", "voidedAt", "voidedBy"
         ])
-        && request.resource.data.updatedAt is string
-        && request.resource.data.updatedBy is string
         && (
-          (resource.data.status == "OPEN" && (request.resource.data.status == "OPEN" || request.resource.data.status == "COMPLETED"))
-          || (request.resource.data.status == "VOIDED"
-            && request.resource.data.voidReason is string
-            && request.resource.data.voidReason.size() > 0)
-          || (request.resource.data.correctionHistory is list
-            && request.resource.data.correctionHistory.size() > (resource.data.correctionHistory is list ? resource.data.correctionHistory.size() : 0))
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(["synchronizedAt"])
+          || (request.resource.data.updatedAt is string
+            && request.resource.data.updatedBy is string
+            && (
+              (resource.data.status == "OPEN" && (request.resource.data.status == "OPEN" || request.resource.data.status == "COMPLETED"))
+              || (request.resource.data.status == "VOIDED"
+                && request.resource.data.voidReason is string
+                && request.resource.data.voidReason.size() > 0)
+              || (request.resource.data.correctionHistory is list
+                && request.resource.data.correctionHistory.size() > (resource.data.correctionHistory is list ? resource.data.correctionHistory.size() : 0))
+            ))
         ));
       allow delete: if systemAdmin();
     }
